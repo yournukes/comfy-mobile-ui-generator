@@ -16,6 +16,7 @@ import websockets
 DATA_DIR = Path("/data")
 PROMPTS_DIR = DATA_DIR / "prompts"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+REPEAT_STATE_FILE = DATA_DIR / "repeat_state.json"
 
 app = FastAPI()
 
@@ -23,6 +24,9 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 _object_info_cache: Dict[str, Any] = {}
+_repeat_state: Dict[str, Any] = {}
+_repeat_task: Optional[asyncio.Task] = None
+_repeat_lock = asyncio.Lock()
 
 
 def _now_iso() -> str:
@@ -52,6 +56,119 @@ def _ensure_data_dirs() -> None:
         print(f"Failed to create data directories: {exc}")
 
 
+def _default_repeat_state() -> Dict[str, Any]:
+    return {
+        "active": False,
+        "base_url": "",
+        "prompt": None,
+        "last_prompt_id": None,
+        "last_error": None,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "runs": 0,
+    }
+
+
+def _load_repeat_state() -> Dict[str, Any]:
+    if not REPEAT_STATE_FILE.exists():
+        return _default_repeat_state()
+    try:
+        data = json.loads(REPEAT_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to read repeat state: {exc}")
+        return _default_repeat_state()
+    default = _default_repeat_state()
+    if isinstance(data, dict):
+        default.update(data)
+    return default
+
+
+def _save_repeat_state(data: Dict[str, Any]) -> None:
+    try:
+        REPEAT_STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save repeat state: {exc}")
+
+
+async def _set_repeat_state(update: Dict[str, Any]) -> Dict[str, Any]:
+    async with _repeat_lock:
+        _repeat_state.update(update)
+        _save_repeat_state(_repeat_state)
+        return dict(_repeat_state)
+
+
+async def _get_repeat_state() -> Dict[str, Any]:
+    async with _repeat_lock:
+        return dict(_repeat_state)
+
+
+async def _repeat_active() -> bool:
+    async with _repeat_lock:
+        return bool(_repeat_state.get("active"))
+
+
+async def _wait_for_history(client: httpx.AsyncClient, base_url: str, prompt_id: str) -> bool:
+    while await _repeat_active():
+        resp = await client.get(f"{base_url}/history/{prompt_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and prompt_id in data:
+            return True
+        await asyncio.sleep(2)
+    return False
+
+
+async def _repeat_loop() -> None:
+    global _repeat_task
+    try:
+        while await _repeat_active():
+            async with _repeat_lock:
+                base_url = _repeat_state.get("base_url") or ""
+                prompt = _repeat_state.get("prompt")
+            if not base_url or prompt is None:
+                await _set_repeat_state(
+                    {
+                        "active": False,
+                        "last_error": "連続実行の設定が不足しています。",
+                    }
+                )
+                break
+            started_at = _now_iso()
+            await _set_repeat_state({"last_started_at": started_at, "last_error": None})
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        f"{base_url}/prompt",
+                        json={"prompt": prompt, "client_id": str(uuid.uuid4())},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    prompt_id = data.get("prompt_id") or data.get("id")
+                    if not prompt_id:
+                        raise HTTPException(status_code=502, detail="Invalid response from ComfyUI")
+                    await _set_repeat_state({"last_prompt_id": prompt_id})
+                    completed = await _wait_for_history(client, base_url, prompt_id)
+                if completed:
+                    state = await _get_repeat_state()
+                    await _set_repeat_state(
+                        {
+                            "last_finished_at": _now_iso(),
+                            "runs": int(state.get("runs") or 0) + 1,
+                        }
+                    )
+            except Exception as exc:
+                await _set_repeat_state({"last_error": str(exc)})
+                await asyncio.sleep(5)
+    finally:
+        _repeat_task = None
+
+
+def _ensure_repeat_task() -> None:
+    global _repeat_task
+    if _repeat_task is None or _repeat_task.done():
+        _repeat_task = asyncio.create_task(_repeat_loop())
+
+
 def _load_settings() -> Dict[str, Any]:
     if not SETTINGS_FILE.exists():
         return {}
@@ -76,6 +193,10 @@ def _prompt_file(prompt_id: str) -> Path:
 @app.on_event("startup")
 async def _startup() -> None:
     _ensure_data_dirs()
+    global _repeat_state
+    _repeat_state = _load_repeat_state()
+    if _repeat_state.get("active"):
+        _ensure_repeat_task()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -150,6 +271,39 @@ async def queue_prompt(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     if not prompt_id:
         raise HTTPException(status_code=502, detail="Invalid response from ComfyUI")
     return JSONResponse({"prompt_id": prompt_id, "client_id": client_id})
+
+
+@app.get("/api/repeat/status")
+async def repeat_status() -> JSONResponse:
+    state = await _get_repeat_state()
+    state.pop("prompt", None)
+    return JSONResponse(state)
+
+
+@app.post("/api/repeat/start")
+async def repeat_start(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
+    base_url = _safe_base_url(payload.get("base_url", ""))
+    prompt = payload.get("prompt")
+    if prompt is None:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    state = await _set_repeat_state(
+        {
+            "active": True,
+            "base_url": base_url,
+            "prompt": prompt,
+            "last_error": None,
+        }
+    )
+    _ensure_repeat_task()
+    state.pop("prompt", None)
+    return JSONResponse(state)
+
+
+@app.post("/api/repeat/stop")
+async def repeat_stop() -> JSONResponse:
+    state = await _set_repeat_state({"active": False})
+    state.pop("prompt", None)
+    return JSONResponse(state)
 
 
 @app.get("/api/history")
