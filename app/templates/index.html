@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ComfyUI Mobile Card UI</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>ComfyUI モバイルカードUI</h1>
+    <p class="subtitle">JSON 貼り付け → 解析 → 実行 → 結果表示</p>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h2>ComfyUI 接続</h2>
+      <label class="field">
+        <span>ComfyUI ベースURL</span>
+        <input id="baseUrl" type="text" placeholder="http://192.168.0.10:8188" value="{{ default_base_url }}" />
+      </label>
+      <div class="button-row">
+        <button id="loadObjectInfo">ノード定義取得</button>
+        <button id="saveDefaultUrl" class="secondary">デフォルトURLとして保存</button>
+        <button id="restoreDefaultUrl" class="secondary">デフォルトURLに戻す</button>
+      </div>
+      <p id="baseUrlStatus" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Prompt JSON</h2>
+      <textarea id="promptInput" rows="10" placeholder="ComfyUI の prompt JSON を貼り付けてください"></textarea>
+      <div class="button-row">
+        <button id="parsePrompt">解析</button>
+        <button id="queuePrompt" class="primary">実行（キュー投入）</button>
+      </div>
+      <p id="parseStatus" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>保存</h2>
+      <label class="field">
+        <span>タイトル</span>
+        <input id="promptTitle" type="text" placeholder="保存用タイトル" />
+      </label>
+      <div class="button-row">
+        <button id="savePrompt" class="secondary">保存</button>
+        <button id="refreshSaved" class="secondary">保存済み一覧更新</button>
+      </div>
+      <p id="saveStatus" class="status"></p>
+      <div id="savedList" class="saved-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>実行状況</h2>
+      <div id="progressInfo" class="progress-info">
+        <div>状態: <span id="executionState">未実行</span></div>
+        <div>ノード: <span id="currentNode">-</span></div>
+        <div class="progress-bar">
+          <div id="progressBarFill" class="progress-bar-fill"></div>
+        </div>
+        <div id="progressText">0%</div>
+        <div id="executionError" class="error"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>ノードカード</h2>
+      <div id="nodeCards" class="card-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>生成結果</h2>
+      <div id="resultImages" class="image-list"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
