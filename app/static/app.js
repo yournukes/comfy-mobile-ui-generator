@@ -11,6 +11,9 @@ const repeatToggleButton = document.getElementById("repeatToggle");
 const parseStatus = document.getElementById("parseStatus");
 const repeatStatus = document.getElementById("repeatStatus");
 
+const clearLogButton = document.getElementById("clearLog");
+const logList = document.getElementById("logList");
+
 const promptTitleInput = document.getElementById("promptTitle");
 const savePromptButton = document.getElementById("savePrompt");
 const refreshSavedButton = document.getElementById("refreshSaved");
@@ -33,6 +36,34 @@ let currentPromptWrapper = null;
 let wsConnection = null;
 let latestPromptId = null;
 let repeatActive = false;
+
+function formatTimestamp(date = new Date()) {
+  return date.toLocaleTimeString("ja-JP", { hour12: false });
+}
+
+function addLogEntry(title, payload, isError = false) {
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
+
+  const header = document.createElement("div");
+  header.className = "log-entry-header";
+  header.textContent = `[${formatTimestamp()}] ${title}`;
+  if (isError) {
+    header.classList.add("error");
+  }
+
+  const body = document.createElement("pre");
+  body.className = "log-entry-body";
+  body.textContent = typeof payload === "string" ? payload : safeStringify(payload);
+
+  entry.appendChild(header);
+  entry.appendChild(body);
+  logList.prepend(entry);
+}
+
+function clearLogs() {
+  logList.innerHTML = "";
+}
 
 function setStatus(element, message, isError = false) {
   element.textContent = message;
@@ -58,6 +89,11 @@ function safeStringify(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function resizePromptTextarea() {
+  promptInput.style.height = "auto";
+  promptInput.style.height = `${promptInput.scrollHeight}px`;
+}
+
 function parsePromptJson() {
   const text = promptInput.value.trim();
   if (!text) {
@@ -75,9 +111,11 @@ function parsePromptJson() {
     }
     setStatus(parseStatus, "解析に成功しました");
     renderNodeCards();
+    resizePromptTextarea();
     return currentPrompt;
   } catch (error) {
     setStatus(parseStatus, `JSON エラー: ${error.message}`, true);
+    addLogEntry("JSON 解析エラー", error.message, true);
     return null;
   }
 }
@@ -90,6 +128,7 @@ function syncPromptTextarea() {
     ? { ...currentPromptWrapper, prompt: currentPrompt }
     : currentPrompt;
   promptInput.value = safeStringify(output);
+  resizePromptTextarea();
 }
 
 function getInputSpec(classType, key) {
@@ -262,9 +301,11 @@ async function loadObjectInfo() {
   try {
     objectInfo = await fetchJson(`/api/object_info?base_url=${encodeURIComponent(baseUrl)}`);
     setStatus(baseUrlStatus, "ノード定義を取得しました");
+    addLogEntry("ノード定義取得レスポンス", objectInfo);
     renderNodeCards();
   } catch (error) {
     setStatus(baseUrlStatus, `取得失敗: ${error.message}`, true);
+    addLogEntry("ノード定義取得失敗", error.message, true);
   }
 }
 
@@ -313,9 +354,11 @@ async function queuePrompt() {
     });
     latestPromptId = response.prompt_id;
     setStatus(parseStatus, `キュー投入完了: ${response.prompt_id}`);
+    addLogEntry("キュー投入レスポンス", response);
     connectWebSocket(baseUrl, response.client_id);
   } catch (error) {
     setStatus(parseStatus, `キュー投入失敗: ${error.message}`, true);
+    addLogEntry("キュー投入失敗", error.message, true);
   }
 }
 
@@ -472,10 +515,12 @@ async function fetchResults() {
   const baseUrl = baseUrlInput.value.trim();
   try {
     const history = await fetchJson(`/api/history?base_url=${encodeURIComponent(baseUrl)}&prompt_id=${encodeURIComponent(latestPromptId)}`);
+    addLogEntry("履歴取得レスポンス", history);
     const images = extractImages(history);
     renderImages(images, baseUrl);
   } catch (error) {
     executionError.textContent = `結果取得失敗: ${error.message}`;
+    addLogEntry("履歴取得失敗", error.message, true);
   }
 }
 
@@ -618,7 +663,10 @@ saveDefaultUrlButton.addEventListener("click", saveDefaultUrl);
 restoreDefaultUrlButton.addEventListener("click", restoreDefaultUrl);
 savePromptButton.addEventListener("click", savePrompt);
 refreshSavedButton.addEventListener("click", refreshSavedList);
+clearLogButton.addEventListener("click", clearLogs);
+promptInput.addEventListener("input", resizePromptTextarea);
 
 refreshSavedList();
 refreshRepeatStatus();
 setInterval(refreshRepeatStatus, 5000);
+resizePromptTextarea();

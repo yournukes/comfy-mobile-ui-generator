@@ -78,7 +78,9 @@ select {
 }
 
 textarea {
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
+  min-height: 120px;
 }
 
 .button-row {
@@ -238,4 +240,40 @@ button.repeat-active {
 .saved-actions {
   display: flex;
   gap: 8px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.log-entry {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.log-entry-header {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.log-entry-body {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
 }
