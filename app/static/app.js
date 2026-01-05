@@ -7,7 +7,9 @@ const baseUrlStatus = document.getElementById("baseUrlStatus");
 const promptInput = document.getElementById("promptInput");
 const parsePromptButton = document.getElementById("parsePrompt");
 const queuePromptButton = document.getElementById("queuePrompt");
+const repeatToggleButton = document.getElementById("repeatToggle");
 const parseStatus = document.getElementById("parseStatus");
+const repeatStatus = document.getElementById("repeatStatus");
 
 const promptTitleInput = document.getElementById("promptTitle");
 const savePromptButton = document.getElementById("savePrompt");
@@ -30,6 +32,7 @@ let currentPrompt = null;
 let currentPromptWrapper = null;
 let wsConnection = null;
 let latestPromptId = null;
+let repeatActive = false;
 
 function setStatus(element, message, isError = false) {
   element.textContent = message;
@@ -316,6 +319,71 @@ async function queuePrompt() {
   }
 }
 
+function renderRepeatStatus(state) {
+  repeatActive = Boolean(state.active);
+  repeatToggleButton.textContent = repeatActive ? "連続実行停止" : "連続実行開始";
+  repeatToggleButton.classList.toggle("repeat-active", repeatActive);
+  let message = repeatActive ? "連続実行中" : "停止中";
+  if (state.runs !== undefined && state.runs !== null) {
+    message += ` / 実行回数: ${state.runs}`;
+  }
+  if (state.last_prompt_id) {
+    message += ` / 最新ID: ${state.last_prompt_id}`;
+  }
+  if (state.last_finished_at) {
+    message += ` / 最終完了: ${state.last_finished_at}`;
+  }
+  if (state.last_error) {
+    setStatus(repeatStatus, `連続実行エラー: ${state.last_error}`, true);
+  } else {
+    setStatus(repeatStatus, message);
+  }
+}
+
+async function refreshRepeatStatus() {
+  try {
+    const data = await fetchJson("/api/repeat/status");
+    renderRepeatStatus(data);
+  } catch (error) {
+    setStatus(repeatStatus, `連続実行ステータス取得失敗: ${error.message}`, true);
+  }
+}
+
+async function toggleRepeat() {
+  if (repeatActive) {
+    try {
+      const data = await fetchJson("/api/repeat/stop", { method: "POST" });
+      renderRepeatStatus(data);
+      setStatus(repeatStatus, "連続実行を停止しました");
+    } catch (error) {
+      setStatus(repeatStatus, `停止失敗: ${error.message}`, true);
+    }
+    return;
+  }
+  const baseUrl = baseUrlInput.value.trim();
+  if (!baseUrl) {
+    setStatus(repeatStatus, "ComfyUI URL を入力してください", true);
+    return;
+  }
+  if (!currentPrompt) {
+    parsePromptJson();
+  }
+  if (!currentPrompt) {
+    return;
+  }
+  setStatus(repeatStatus, "連続実行を開始しています...");
+  try {
+    const data = await fetchJson("/api/repeat/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt }),
+    });
+    renderRepeatStatus(data);
+  } catch (error) {
+    setStatus(repeatStatus, `連続実行開始失敗: ${error.message}`, true);
+  }
+}
+
 function resetExecutionState() {
   executionState.textContent = "待機中";
   currentNode.textContent = "-";
@@ -544,6 +612,7 @@ async function savePrompt() {
 
 parsePromptButton.addEventListener("click", parsePromptJson);
 queuePromptButton.addEventListener("click", queuePrompt);
+repeatToggleButton.addEventListener("click", toggleRepeat);
 loadObjectInfoButton.addEventListener("click", loadObjectInfo);
 saveDefaultUrlButton.addEventListener("click", saveDefaultUrl);
 restoreDefaultUrlButton.addEventListener("click", restoreDefaultUrl);
@@ -551,3 +620,5 @@ savePromptButton.addEventListener("click", savePrompt);
 refreshSavedButton.addEventListener("click", refreshSavedList);
 
 refreshSavedList();
+refreshRepeatStatus();
+setInterval(refreshRepeatStatus, 5000);
