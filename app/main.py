@@ -67,9 +67,11 @@ def _default_repeat_state() -> Dict[str, Any]:
         "prompt": None,
         "last_prompt_id": None,
         "last_error": None,
+        "stop_reason": None,
         "last_started_at": None,
         "last_finished_at": None,
         "runs": 0,
+        "max_runs": None,
     }
 
 
@@ -210,12 +212,16 @@ async def _repeat_loop() -> None:
                     completed = await _wait_for_history(client, base_url, prompt_id)
                 if completed:
                     state = await _get_repeat_state()
-                    await _set_repeat_state(
-                        {
-                            "last_finished_at": _now_iso(),
-                            "runs": int(state.get("runs") or 0) + 1,
-                        }
-                    )
+                    runs = int(state.get("runs") or 0) + 1
+                    max_runs = state.get("max_runs")
+                    update = {
+                        "last_finished_at": _now_iso(),
+                        "runs": runs,
+                    }
+                    if max_runs and runs >= int(max_runs):
+                        update["active"] = False
+                        update["stop_reason"] = "指定回数に到達しました"
+                    await _set_repeat_state(update)
             except Exception as exc:
                 await _set_repeat_state({"last_error": str(exc)})
                 await asyncio.sleep(5)
@@ -357,6 +363,14 @@ async def repeat_start(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     prompt = payload.get("prompt")
     if prompt is None:
         raise HTTPException(status_code=400, detail="prompt is required")
+    max_runs = payload.get("max_runs")
+    if max_runs is not None:
+        try:
+            max_runs = int(max_runs)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="max_runs must be an integer") from exc
+        if max_runs <= 0:
+            raise HTTPException(status_code=400, detail="max_runs must be >= 1")
     client_id = str(uuid.uuid4())
     state = await _set_repeat_state(
         {
@@ -365,9 +379,11 @@ async def repeat_start(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
             "client_id": client_id,
             "prompt": prompt,
             "last_error": None,
+            "stop_reason": None,
             "last_prompt_id": None,
             "last_finished_at": None,
             "runs": 0,
+            "max_runs": max_runs,
         }
     )
     _ensure_repeat_task()
@@ -383,7 +399,7 @@ async def last_job() -> JSONResponse:
 
 @app.post("/api/repeat/stop")
 async def repeat_stop() -> JSONResponse:
-    state = await _set_repeat_state({"active": False})
+    state = await _set_repeat_state({"active": False, "stop_reason": "手動停止"})
     state.pop("prompt", None)
     return JSONResponse(state)
 
