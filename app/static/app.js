@@ -823,9 +823,17 @@ function extractImages(history, promptId) {
 }
 
 function renderImages(images, baseUrl) {
+  const previousHeight = resultImages.offsetHeight;
+  if (previousHeight) {
+    resultImages.style.minHeight = `${previousHeight}px`;
+  }
   resultImages.innerHTML = "";
+  const finalizeRefresh = () => {
+    resultImages.style.minHeight = "";
+  };
   if (!images.length) {
     resultImages.textContent = "画像が見つかりませんでした";
+    finalizeRefresh();
     return;
   }
   isMaskedDefault = true;
@@ -853,12 +861,25 @@ function renderImages(images, baseUrl) {
   resultImages.appendChild(grid);
 
   resultImages.classList.toggle("masked", isMaskedDefault);
+  let remaining = images.length;
+  const handleImageDone = () => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      finalizeRefresh();
+    }
+  };
   images.forEach((image) => {
     const url = `/api/view?base_url=${encodeURIComponent(baseUrl)}&filename=${encodeURIComponent(image.filename)}${image.subfolder ? `&subfolder=${encodeURIComponent(image.subfolder)}` : ""}${image.type ? `&type=${encodeURIComponent(image.type)}` : ""}`;
     const img = document.createElement("img");
     img.src = url;
     img.alt = image.filename;
     img.loading = "lazy";
+    if (img.complete) {
+      handleImageDone();
+    } else {
+      img.addEventListener("load", handleImageDone, { once: true });
+      img.addEventListener("error", handleImageDone, { once: true });
+    }
     img.addEventListener("click", () => {
       img.classList.toggle("zoom");
     });
