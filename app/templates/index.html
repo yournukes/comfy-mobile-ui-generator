@@ -29,6 +29,10 @@
 
     <section class="panel">
       <h2>Prompt JSON</h2>
+      <label class="field file-field">
+        <span>JSON ファイルをアップロード</span>
+        <input id="promptFile" type="file" accept=".json,application/json" />
+      </label>
       <textarea id="promptInput" rows="10" placeholder="ComfyUI の prompt JSON を貼り付けてください"></textarea>
       <div class="button-row">
         <button id="parsePrompt">解析</button>

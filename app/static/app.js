@@ -10,6 +10,7 @@ const queuePromptButton = document.getElementById("queuePrompt");
 const repeatToggleButton = document.getElementById("repeatToggle");
 const parseStatus = document.getElementById("parseStatus");
 const repeatStatus = document.getElementById("repeatStatus");
+const promptFileInput = document.getElementById("promptFile");
 
 const clearLogButton = document.getElementById("clearLog");
 const logList = document.getElementById("logList");
@@ -29,6 +30,7 @@ const progressText = document.getElementById("progressText");
 const executionError = document.getElementById("executionError");
 
 const resultImages = document.getElementById("resultImages");
+let isMaskedDefault = true;
 
 let objectInfo = {};
 let currentPrompt = null;
@@ -89,9 +91,30 @@ function safeStringify(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function resizePromptTextarea() {
-  promptInput.style.height = "auto";
-  promptInput.style.height = `${promptInput.scrollHeight}px`;
+function applyPromptJsonText(text) {
+  promptInput.value = text;
+  parsePromptJson();
+}
+
+function handlePromptFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".json") && file.type !== "application/json") {
+    setStatus(parseStatus, "JSON ファイルを選択してください", true);
+    event.target.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    applyPromptJsonText(String(reader.result || ""));
+    setStatus(parseStatus, `ファイルを読み込みました: ${file.name}`);
+  };
+  reader.onerror = () => {
+    setStatus(parseStatus, "ファイルの読み込みに失敗しました", true);
+  };
+  reader.readAsText(file);
 }
 
 function parsePromptJson() {
@@ -111,7 +134,6 @@ function parsePromptJson() {
     }
     setStatus(parseStatus, "解析に成功しました");
     renderNodeCards();
-    resizePromptTextarea();
     return currentPrompt;
   } catch (error) {
     setStatus(parseStatus, `JSON エラー: ${error.message}`, true);
@@ -128,7 +150,6 @@ function syncPromptTextarea() {
     ? { ...currentPromptWrapper, prompt: currentPrompt }
     : currentPrompt;
   promptInput.value = safeStringify(output);
-  resizePromptTextarea();
 }
 
 function getInputSpec(classType, key) {
@@ -576,6 +597,31 @@ function renderImages(images, baseUrl) {
     resultImages.textContent = "画像が見つかりませんでした";
     return;
   }
+  isMaskedDefault = true;
+  const controls = document.createElement("div");
+  controls.className = "image-controls";
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "secondary";
+  const updateToggleLabel = () => {
+    toggleButton.textContent = isMaskedDefault ? "マスク解除" : "マスク表示";
+  };
+  updateToggleLabel();
+  toggleButton.addEventListener("click", () => {
+    isMaskedDefault = !isMaskedDefault;
+    resultImages.classList.toggle("masked", isMaskedDefault);
+    updateToggleLabel();
+  });
+
+  controls.appendChild(toggleButton);
+  resultImages.appendChild(controls);
+
+  const grid = document.createElement("div");
+  grid.className = "image-grid";
+  resultImages.appendChild(grid);
+
+  resultImages.classList.toggle("masked", isMaskedDefault);
   images.forEach((image) => {
     const url = `/api/view?base_url=${encodeURIComponent(baseUrl)}&filename=${encodeURIComponent(image.filename)}${image.subfolder ? `&subfolder=${encodeURIComponent(image.subfolder)}` : ""}${image.type ? `&type=${encodeURIComponent(image.type)}` : ""}`;
     const img = document.createElement("img");
@@ -585,7 +631,7 @@ function renderImages(images, baseUrl) {
     img.addEventListener("click", () => {
       img.classList.toggle("zoom");
     });
-    resultImages.appendChild(img);
+    grid.appendChild(img);
   });
 }
 
@@ -693,9 +739,11 @@ restoreDefaultUrlButton.addEventListener("click", restoreDefaultUrl);
 savePromptButton.addEventListener("click", savePrompt);
 refreshSavedButton.addEventListener("click", refreshSavedList);
 clearLogButton.addEventListener("click", clearLogs);
-promptInput.addEventListener("input", resizePromptTextarea);
+promptFileInput.addEventListener("change", handlePromptFileUpload);
+promptInput.addEventListener("input", () => {
+  promptInput.style.height = "";
+});
 
 refreshSavedList();
 refreshRepeatStatus();
 setInterval(refreshRepeatStatus, 5000);
-resizePromptTextarea();
