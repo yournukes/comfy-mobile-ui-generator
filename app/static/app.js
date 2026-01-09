@@ -465,38 +465,67 @@ function handleWsEvent(data) {
   if (!data || !data.type) {
     return;
   }
+  const payload = data.data ?? data;
+  const matchesLatestPrompt = () => {
+    if (!latestPromptId) {
+      return true;
+    }
+    return !payload.prompt_id || payload.prompt_id === latestPromptId;
+  };
   switch (data.type) {
     case "execution_start":
+      if (!matchesLatestPrompt()) {
+        return;
+      }
       executionState.textContent = "実行開始";
       break;
     case "executing":
-      if (data.node === null) {
+      if (!matchesLatestPrompt()) {
+        return;
+      }
+      if (payload.node === null) {
         executionState.textContent = "完了";
+        currentNode.textContent = "-";
         fetchResults();
+      } else if (payload.node === undefined) {
+        executionState.textContent = "実行中";
+        currentNode.textContent = "-";
       } else {
         executionState.textContent = "実行中";
-        const nodeData = currentPrompt && currentPrompt[data.node];
+        const nodeData = currentPrompt && currentPrompt[payload.node];
         const classType = nodeData ? nodeData.class_type : "?";
-        currentNode.textContent = `${data.node} (${classType})`;
+        currentNode.textContent = `${payload.node} (${classType})`;
       }
       break;
     case "progress":
-      if (data.value !== undefined && data.max) {
-        const percent = Math.min(100, Math.round((data.value / data.max) * 100));
+      if (!matchesLatestPrompt()) {
+        return;
+      }
+      if (payload.value !== undefined && payload.max) {
+        const percent = Math.min(100, Math.round((payload.value / payload.max) * 100));
         progressBarFill.style.width = `${percent}%`;
         progressText.textContent = `${percent}%`;
       }
       break;
     case "execution_success":
+      if (!matchesLatestPrompt()) {
+        return;
+      }
       executionState.textContent = "成功";
       fetchResults();
       break;
     case "execution_error":
     case "execution_interrupted":
+      if (!matchesLatestPrompt()) {
+        return;
+      }
       executionState.textContent = "エラー";
-      executionError.textContent = data.message || "エラーが発生しました";
+      executionError.textContent = payload.message || data.message || "エラーが発生しました";
       break;
     case "executed":
+      if (!matchesLatestPrompt()) {
+        return;
+      }
       executionState.textContent = "ノード完了";
       break;
     case "proxy_error":
