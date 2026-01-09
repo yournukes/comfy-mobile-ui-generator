@@ -182,7 +182,26 @@ function resolveReference(value) {
   return { nodeId, outputIndex, classType: currentPrompt[nodeId].class_type };
 }
 
-function createInputControl(nodeId, key, value, spec) {
+function shouldUseTextarea(classType, key, value, spec) {
+  if (spec && Array.isArray(spec)) {
+    const type = spec[0];
+    const options = spec[1] || {};
+    if (type === "STRING" && (options.multiline || options.rows)) {
+      return true;
+    }
+  }
+  if (typeof value === "string") {
+    if (classType && classType.toLowerCase().includes("note")) {
+      return true;
+    }
+    if (key.toLowerCase().includes("text") && value.includes("\n")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function createInputControl(nodeId, classType, key, value, spec) {
   const wrapper = document.createElement("div");
   wrapper.className = "input-row";
 
@@ -195,6 +214,7 @@ function createInputControl(nodeId, key, value, spec) {
   inputContainer.className = "input-control";
 
   let inputElement = null;
+  const forceTextarea = shouldUseTextarea(classType, key, value, spec);
   const resolvedRef = resolveReference(value);
   if (resolvedRef) {
     inputElement = document.createElement("input");
@@ -241,7 +261,7 @@ function createInputControl(nodeId, key, value, spec) {
         currentPrompt[nodeId].inputs[key] = inputElement.checked;
         syncPromptTextarea();
       });
-    } else if (type === "STRING" && (options.multiline || options.rows)) {
+    } else if (type === "STRING" && (options.multiline || options.rows || forceTextarea)) {
       inputElement = document.createElement("textarea");
       inputElement.rows = options.rows || 3;
       inputElement.value = value ?? options.default ?? "";
@@ -271,13 +291,23 @@ function createInputControl(nodeId, key, value, spec) {
       });
     }
   } else {
-    inputElement = document.createElement("input");
-    inputElement.type = "text";
-    inputElement.value = value ?? "";
-    inputElement.addEventListener("change", () => {
-      currentPrompt[nodeId].inputs[key] = inputElement.value;
-      syncPromptTextarea();
-    });
+    if (forceTextarea) {
+      inputElement = document.createElement("textarea");
+      inputElement.rows = 3;
+      inputElement.value = value ?? "";
+      inputElement.addEventListener("input", () => {
+        currentPrompt[nodeId].inputs[key] = inputElement.value;
+        syncPromptTextarea();
+      });
+    } else {
+      inputElement = document.createElement("input");
+      inputElement.type = "text";
+      inputElement.value = value ?? "";
+      inputElement.addEventListener("change", () => {
+        currentPrompt[nodeId].inputs[key] = inputElement.value;
+        syncPromptTextarea();
+      });
+    }
   }
 
   inputContainer.appendChild(inputElement);
@@ -307,7 +337,7 @@ function renderNodeCards() {
     const inputs = nodeData.inputs || {};
     Object.entries(inputs).forEach(([key, value]) => {
       const spec = getInputSpec(nodeData.class_type, key);
-      const row = createInputControl(nodeId, key, value, spec);
+      const row = createInputControl(nodeId, nodeData.class_type, key, value, spec);
       body.appendChild(row);
     });
 
@@ -673,13 +703,23 @@ function extractImages(history) {
   if (!history || typeof history !== "object") {
     return items;
   }
-  const entry = history[activeRun.promptId];
+  const promptKey = activeRun.promptId != null ? String(activeRun.promptId) : null;
+  const entry =
+    (promptKey && history[promptKey]) ||
+    (promptKey && history[Number(promptKey)]) ||
+    (history.outputs ? history : null);
   if (!entry || !entry.outputs) {
     return items;
   }
   Object.values(entry.outputs).forEach((output) => {
-    if (output.images) {
+    if (!output || typeof output !== "object") {
+      return;
+    }
+    if (Array.isArray(output.images)) {
       output.images.forEach((image) => items.push(image));
+    }
+    if (Array.isArray(output.gifs)) {
+      output.gifs.forEach((image) => items.push(image));
     }
   });
   return items;
