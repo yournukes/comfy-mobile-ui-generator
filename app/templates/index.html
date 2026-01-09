@@ -89,6 +89,22 @@
     </section>
   </main>
 
+  <div class="floating-controls" aria-label="実行コントロール">
+    <div class="floating-progress">
+      <div class="progress-bar floating-progress-bar">
+        <div id="floatingProgressBarFill" class="progress-bar-fill"></div>
+      </div>
+    </div>
+    <div class="floating-actions">
+      <button id="floatingQueuePrompt" type="button" class="floating-button primary" aria-label="実行">
+        ▶
+      </button>
+      <button id="floatingRepeatToggle" type="button" class="floating-button secondary" aria-label="連続実行開始">
+        ↻
+      </button>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>
