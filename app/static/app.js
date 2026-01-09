@@ -683,14 +683,15 @@ function handleWsEvent(data) {
 }
 
 async function fetchResults() {
-  if (!activeRun.promptId) {
+  const promptId = activeRun.promptId;
+  if (!promptId) {
     return;
   }
   const baseUrl = activeRun.baseUrl || baseUrlInput.value.trim();
   try {
-    const history = await fetchJson(`/api/history?base_url=${encodeURIComponent(baseUrl)}&prompt_id=${encodeURIComponent(activeRun.promptId)}`);
+    const history = await fetchJson(`/api/history?base_url=${encodeURIComponent(baseUrl)}&prompt_id=${encodeURIComponent(promptId)}`);
     addLogEntry("履歴取得レスポンス", history);
-    const images = extractImages(history);
+    const images = extractImages(history, promptId);
     renderImages(images, baseUrl);
   } catch (error) {
     executionError.textContent = `結果取得失敗: ${error.message}`;
@@ -698,12 +699,12 @@ async function fetchResults() {
   }
 }
 
-function extractImages(history) {
+function extractImages(history, promptId) {
   const items = [];
   if (!history || typeof history !== "object") {
     return items;
   }
-  const promptKey = activeRun.promptId != null ? String(activeRun.promptId) : null;
+  const promptKey = promptId != null ? String(promptId) : null;
   const entry =
     (promptKey && history[promptKey]) ||
     (promptKey && history[Number(promptKey)]) ||
