@@ -36,7 +36,8 @@ let objectInfo = {};
 let currentPrompt = null;
 let currentPromptWrapper = null;
 let wsConnection = null;
-let latestPromptId = null;
+let activeRun = { mode: null, promptId: null, baseUrl: null };
+let lastRepeatPromptId = null;
 let wsMode = null;
 let activeWsClientId = null;
 let activeWsBaseUrl = null;
@@ -387,7 +388,7 @@ async function queuePrompt() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt }),
     });
-    latestPromptId = response.prompt_id;
+    activeRun = { mode: "manual", promptId: response.prompt_id, baseUrl };
     setStatus(parseStatus, `キュー投入完了: ${response.prompt_id}`);
     addLogEntry("キュー投入レスポンス", response);
     connectWebSocket(baseUrl, response.client_id);
@@ -424,7 +425,7 @@ async function refreshRepeatStatus() {
     renderRepeatStatus(data);
     if (data.active && data.client_id) {
       const baseUrl = data.base_url || baseUrlInput.value.trim();
-      if (baseUrl) {
+      if (baseUrl && wsMode !== "manual") {
         connectRepeatWebSocket(baseUrl, data.client_id);
       }
     } else if (!data.active && wsMode === "repeat") {
@@ -433,9 +434,17 @@ async function refreshRepeatStatus() {
       activeWsClientId = null;
       activeWsBaseUrl = null;
     }
-    if (data.last_prompt_id && data.last_prompt_id !== latestPromptId) {
-      latestPromptId = data.last_prompt_id;
-      resetExecutionState();
+    if (data.last_prompt_id) {
+      const baseUrl = data.base_url || baseUrlInput.value.trim();
+      if (data.last_prompt_id !== lastRepeatPromptId) {
+        lastRepeatPromptId = data.last_prompt_id;
+      }
+      if (data.active && activeRun.mode !== "manual" && activeRun.promptId !== data.last_prompt_id) {
+        activeRun = { mode: "repeat", promptId: data.last_prompt_id, baseUrl };
+        resetExecutionState();
+      }
+    } else if (!data.active && activeRun.mode === "repeat") {
+      activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
     }
   } catch (error) {
     setStatus(repeatStatus, `連続実行ステータス取得失敗: ${error.message}`, true);
@@ -452,6 +461,9 @@ async function toggleRepeat() {
         wsMode = null;
         activeWsClientId = null;
         activeWsBaseUrl = null;
+      }
+      if (activeRun.mode === "repeat") {
+        activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
       }
       setStatus(repeatStatus, "連続実行を停止しました");
     } catch (error) {
@@ -478,6 +490,7 @@ async function toggleRepeat() {
       body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt }),
     });
     renderRepeatStatus(data);
+    activeRun = { mode: "repeat", promptId: data.last_prompt_id || null, baseUrl };
     if (data.client_id) {
       connectRepeatWebSocket(baseUrl, data.client_id);
     }
@@ -560,10 +573,10 @@ function handleWsEvent(data) {
   }
   const payload = data.data ?? data;
   const matchesLatestPrompt = () => {
-    if (!latestPromptId) {
+    if (!activeRun.promptId) {
       return true;
     }
-    return !payload.prompt_id || payload.prompt_id === latestPromptId;
+    return !payload.prompt_id || payload.prompt_id === activeRun.promptId;
   };
   switch (data.type) {
     case "execution_start":
@@ -580,6 +593,9 @@ function handleWsEvent(data) {
         executionState.textContent = "完了";
         currentNode.textContent = "-";
         fetchResults();
+        if (activeRun.mode === "manual") {
+          activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
+        }
       } else if (payload.node === undefined) {
         executionState.textContent = "実行中";
         currentNode.textContent = "-";
@@ -606,6 +622,9 @@ function handleWsEvent(data) {
       }
       executionState.textContent = "成功";
       fetchResults();
+      if (activeRun.mode === "manual") {
+        activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
+      }
       break;
     case "execution_error":
     case "execution_interrupted":
@@ -614,6 +633,9 @@ function handleWsEvent(data) {
       }
       executionState.textContent = "エラー";
       executionError.textContent = payload.message || data.message || "エラーが発生しました";
+      if (activeRun.mode === "manual") {
+        activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
+      }
       break;
     case "executed":
       if (!matchesLatestPrompt()) {
@@ -631,12 +653,12 @@ function handleWsEvent(data) {
 }
 
 async function fetchResults() {
-  if (!latestPromptId) {
+  if (!activeRun.promptId) {
     return;
   }
-  const baseUrl = baseUrlInput.value.trim();
+  const baseUrl = activeRun.baseUrl || baseUrlInput.value.trim();
   try {
-    const history = await fetchJson(`/api/history?base_url=${encodeURIComponent(baseUrl)}&prompt_id=${encodeURIComponent(latestPromptId)}`);
+    const history = await fetchJson(`/api/history?base_url=${encodeURIComponent(baseUrl)}&prompt_id=${encodeURIComponent(activeRun.promptId)}`);
     addLogEntry("履歴取得レスポンス", history);
     const images = extractImages(history);
     renderImages(images, baseUrl);
@@ -651,7 +673,7 @@ function extractImages(history) {
   if (!history || typeof history !== "object") {
     return items;
   }
-  const entry = history[latestPromptId];
+  const entry = history[activeRun.promptId];
   if (!entry || !entry.outputs) {
     return items;
   }
