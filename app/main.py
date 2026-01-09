@@ -17,6 +17,7 @@ DATA_DIR = Path("/data")
 PROMPTS_DIR = DATA_DIR / "prompts"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 REPEAT_STATE_FILE = DATA_DIR / "repeat_state.json"
+LAST_JOB_FILE = DATA_DIR / "last_job.json"
 
 app = FastAPI()
 
@@ -27,6 +28,8 @@ _object_info_cache: Dict[str, Any] = {}
 _repeat_state: Dict[str, Any] = {}
 _repeat_task: Optional[asyncio.Task] = None
 _repeat_lock = asyncio.Lock()
+_last_job: Dict[str, Any] = {}
+_last_job_lock = asyncio.Lock()
 
 
 def _now_iso() -> str:
@@ -91,6 +94,49 @@ def _save_repeat_state(data: Dict[str, Any]) -> None:
         raise HTTPException(status_code=500, detail=f"Failed to save repeat state: {exc}")
 
 
+def _default_last_job() -> Dict[str, Any]:
+    return {
+        "mode": None,
+        "base_url": "",
+        "client_id": None,
+        "prompt_id": None,
+        "updated_at": None,
+    }
+
+
+def _load_last_job() -> Dict[str, Any]:
+    if not LAST_JOB_FILE.exists():
+        return _default_last_job()
+    try:
+        data = json.loads(LAST_JOB_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to read last job: {exc}")
+        return _default_last_job()
+    default = _default_last_job()
+    if isinstance(data, dict):
+        default.update(data)
+    return default
+
+
+def _save_last_job(data: Dict[str, Any]) -> None:
+    try:
+        LAST_JOB_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save last job: {exc}")
+
+
+async def _set_last_job(update: Dict[str, Any]) -> Dict[str, Any]:
+    async with _last_job_lock:
+        _last_job.update(update)
+        _save_last_job(_last_job)
+        return dict(_last_job)
+
+
+async def _get_last_job() -> Dict[str, Any]:
+    async with _last_job_lock:
+        return dict(_last_job)
+
+
 async def _set_repeat_state(update: Dict[str, Any]) -> Dict[str, Any]:
     async with _repeat_lock:
         _repeat_state.update(update)
@@ -152,6 +198,15 @@ async def _repeat_loop() -> None:
                     if not prompt_id:
                         raise HTTPException(status_code=502, detail="Invalid response from ComfyUI")
                     await _set_repeat_state({"last_prompt_id": prompt_id})
+                    await _set_last_job(
+                        {
+                            "mode": "repeat",
+                            "base_url": base_url,
+                            "client_id": client_id,
+                            "prompt_id": prompt_id,
+                            "updated_at": _now_iso(),
+                        }
+                    )
                     completed = await _wait_for_history(client, base_url, prompt_id)
                 if completed:
                     state = await _get_repeat_state()
@@ -200,6 +255,8 @@ async def _startup() -> None:
     _ensure_data_dirs()
     global _repeat_state
     _repeat_state = _load_repeat_state()
+    global _last_job
+    _last_job = _load_last_job()
     if _repeat_state.get("active"):
         _ensure_repeat_task()
 
@@ -275,6 +332,15 @@ async def queue_prompt(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     prompt_id = data.get("prompt_id") or data.get("id")
     if not prompt_id:
         raise HTTPException(status_code=502, detail="Invalid response from ComfyUI")
+    await _set_last_job(
+        {
+            "mode": "manual",
+            "base_url": base_url,
+            "client_id": client_id,
+            "prompt_id": prompt_id,
+            "updated_at": _now_iso(),
+        }
+    )
     return JSONResponse({"prompt_id": prompt_id, "client_id": client_id})
 
 
@@ -306,6 +372,12 @@ async def repeat_start(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     )
     _ensure_repeat_task()
     state.pop("prompt", None)
+    return JSONResponse(state)
+
+
+@app.get("/api/last_job")
+async def last_job() -> JSONResponse:
+    state = await _get_last_job()
     return JSONResponse(state)
 
 
