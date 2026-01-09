@@ -37,6 +37,9 @@ let currentPrompt = null;
 let currentPromptWrapper = null;
 let wsConnection = null;
 let latestPromptId = null;
+let wsMode = null;
+let activeWsClientId = null;
+let activeWsBaseUrl = null;
 let repeatActive = false;
 
 function formatTimestamp(date = new Date()) {
@@ -91,11 +94,6 @@ function safeStringify(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function applyPromptJsonText(text) {
-  promptInput.value = text;
-  parsePromptJson();
-}
-
 function handlePromptFileUpload(event) {
   const file = event.target.files[0];
   if (!file) {
@@ -108,8 +106,16 @@ function handlePromptFileUpload(event) {
   }
   const reader = new FileReader();
   reader.onload = () => {
-    applyPromptJsonText(String(reader.result || ""));
-    setStatus(parseStatus, `ファイルを読み込みました: ${file.name}`);
+    const text = String(reader.result || "");
+    promptInput.value = text;
+    const parsed = parsePromptJson();
+    if (parsed) {
+      const output = currentPromptWrapper
+        ? { ...currentPromptWrapper, prompt: currentPrompt }
+        : currentPrompt;
+      promptInput.value = safeStringify(output);
+      setStatus(parseStatus, `ファイルを読み込みました: ${file.name}`);
+    }
   };
   reader.onerror = () => {
     setStatus(parseStatus, "ファイルの読み込みに失敗しました", true);
@@ -232,6 +238,14 @@ function createInputControl(nodeId, key, value, spec) {
       inputElement.checked = Boolean(value);
       inputElement.addEventListener("change", () => {
         currentPrompt[nodeId].inputs[key] = inputElement.checked;
+        syncPromptTextarea();
+      });
+    } else if (type === "STRING" && (options.multiline || options.rows)) {
+      inputElement = document.createElement("textarea");
+      inputElement.rows = options.rows || 3;
+      inputElement.value = value ?? options.default ?? "";
+      inputElement.addEventListener("input", () => {
+        currentPrompt[nodeId].inputs[key] = inputElement.value;
         syncPromptTextarea();
       });
     } else if (type === "INT" || type === "FLOAT" || typeof value === "number") {
@@ -408,6 +422,21 @@ async function refreshRepeatStatus() {
   try {
     const data = await fetchJson("/api/repeat/status");
     renderRepeatStatus(data);
+    if (data.active && data.client_id) {
+      const baseUrl = data.base_url || baseUrlInput.value.trim();
+      if (baseUrl) {
+        connectRepeatWebSocket(baseUrl, data.client_id);
+      }
+    } else if (!data.active && wsMode === "repeat") {
+      wsConnection?.close();
+      wsMode = null;
+      activeWsClientId = null;
+      activeWsBaseUrl = null;
+    }
+    if (data.last_prompt_id && data.last_prompt_id !== latestPromptId) {
+      latestPromptId = data.last_prompt_id;
+      resetExecutionState();
+    }
   } catch (error) {
     setStatus(repeatStatus, `連続実行ステータス取得失敗: ${error.message}`, true);
   }
@@ -418,6 +447,12 @@ async function toggleRepeat() {
     try {
       const data = await fetchJson("/api/repeat/stop", { method: "POST" });
       renderRepeatStatus(data);
+      if (wsMode === "repeat") {
+        wsConnection?.close();
+        wsMode = null;
+        activeWsClientId = null;
+        activeWsBaseUrl = null;
+      }
       setStatus(repeatStatus, "連続実行を停止しました");
     } catch (error) {
       setStatus(repeatStatus, `停止失敗: ${error.message}`, true);
@@ -443,6 +478,9 @@ async function toggleRepeat() {
       body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt }),
     });
     renderRepeatStatus(data);
+    if (data.client_id) {
+      connectRepeatWebSocket(baseUrl, data.client_id);
+    }
   } catch (error) {
     setStatus(repeatStatus, `連続実行開始失敗: ${error.message}`, true);
   }
@@ -463,8 +501,42 @@ function connectWebSocket(baseUrl, clientId) {
   }
   const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?base_url=${encodeURIComponent(baseUrl)}&client_id=${encodeURIComponent(clientId)}`;
   wsConnection = new WebSocket(wsUrl);
+  wsMode = "manual";
+  activeWsClientId = clientId;
+  activeWsBaseUrl = baseUrl;
   wsConnection.onopen = () => {
     executionState.textContent = "接続済み";
+  };
+  wsConnection.onclose = () => {
+    executionState.textContent = "WS切断";
+  };
+  wsConnection.onerror = () => {
+    executionState.textContent = "WSエラー";
+  };
+  wsConnection.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleWsEvent(data);
+    } catch (error) {
+      console.warn("WS parse error", error);
+    }
+  };
+}
+
+function connectRepeatWebSocket(baseUrl, clientId) {
+  if (wsMode === "repeat" && activeWsClientId === clientId && activeWsBaseUrl === baseUrl && wsConnection) {
+    return;
+  }
+  if (wsConnection) {
+    wsConnection.close();
+  }
+  const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws?base_url=${encodeURIComponent(baseUrl)}&client_id=${encodeURIComponent(clientId)}`;
+  wsConnection = new WebSocket(wsUrl);
+  wsMode = "repeat";
+  activeWsClientId = clientId;
+  activeWsBaseUrl = baseUrl;
+  wsConnection.onopen = () => {
+    executionState.textContent = "連続実行WS接続";
   };
   wsConnection.onclose = () => {
     executionState.textContent = "WS切断";

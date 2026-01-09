@@ -60,6 +60,7 @@ def _default_repeat_state() -> Dict[str, Any]:
     return {
         "active": False,
         "base_url": "",
+        "client_id": None,
         "prompt": None,
         "last_prompt_id": None,
         "last_error": None,
@@ -125,6 +126,7 @@ async def _repeat_loop() -> None:
             async with _repeat_lock:
                 base_url = _repeat_state.get("base_url") or ""
                 prompt = _repeat_state.get("prompt")
+                client_id = _repeat_state.get("client_id")
             if not base_url or prompt is None:
                 await _set_repeat_state(
                     {
@@ -133,13 +135,16 @@ async def _repeat_loop() -> None:
                     }
                 )
                 break
+            if not client_id:
+                client_id = str(uuid.uuid4())
+                await _set_repeat_state({"client_id": client_id})
             started_at = _now_iso()
             await _set_repeat_state({"last_started_at": started_at, "last_error": None})
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.post(
                         f"{base_url}/prompt",
-                        json={"prompt": prompt, "client_id": str(uuid.uuid4())},
+                        json={"prompt": prompt, "client_id": client_id},
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -286,12 +291,17 @@ async def repeat_start(payload: Dict[str, Any] = Body(...)) -> JSONResponse:
     prompt = payload.get("prompt")
     if prompt is None:
         raise HTTPException(status_code=400, detail="prompt is required")
+    client_id = str(uuid.uuid4())
     state = await _set_repeat_state(
         {
             "active": True,
             "base_url": base_url,
+            "client_id": client_id,
             "prompt": prompt,
             "last_error": None,
+            "last_prompt_id": None,
+            "last_finished_at": None,
+            "runs": 0,
         }
     )
     _ensure_repeat_task()
