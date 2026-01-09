@@ -212,7 +212,13 @@ button.repeat-active {
 .image-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .image-grid {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
 }
 
 .image-list img {
