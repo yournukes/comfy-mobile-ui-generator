@@ -117,6 +117,49 @@ button.repeat-active {
   box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
 }
 
+.floating-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+  z-index: 30;
+  min-width: 180px;
+}
+
+.floating-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.floating-progress-bar {
+  height: 6px;
+}
+
+.floating-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.floating-button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 18px;
+}
+
 .status {
   font-size: 12px;
   color: var(--muted);

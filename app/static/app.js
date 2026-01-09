@@ -8,6 +8,8 @@ const promptInput = document.getElementById("promptInput");
 const parsePromptButton = document.getElementById("parsePrompt");
 const queuePromptButton = document.getElementById("queuePrompt");
 const repeatToggleButton = document.getElementById("repeatToggle");
+const floatingQueuePromptButton = document.getElementById("floatingQueuePrompt");
+const floatingRepeatToggleButton = document.getElementById("floatingRepeatToggle");
 const parseStatus = document.getElementById("parseStatus");
 const repeatStatus = document.getElementById("repeatStatus");
 const promptFileInput = document.getElementById("promptFile");
@@ -26,6 +28,7 @@ const nodeCards = document.getElementById("nodeCards");
 const executionState = document.getElementById("executionState");
 const currentNode = document.getElementById("currentNode");
 const progressBarFill = document.getElementById("progressBarFill");
+const floatingProgressBarFill = document.getElementById("floatingProgressBarFill");
 const progressText = document.getElementById("progressText");
 const executionError = document.getElementById("executionError");
 
@@ -432,6 +435,7 @@ function renderRepeatStatus(state) {
   repeatActive = Boolean(state.active);
   repeatToggleButton.textContent = repeatActive ? "連続実行停止" : "連続実行開始";
   repeatToggleButton.classList.toggle("repeat-active", repeatActive);
+  updateRepeatButtons();
   let message = repeatActive ? "連続実行中" : "停止中";
   if (state.runs !== undefined && state.runs !== null) {
     message += ` / 実行回数: ${state.runs}`;
@@ -529,10 +533,30 @@ async function toggleRepeat() {
   }
 }
 
+function updateRepeatButtons() {
+  if (!floatingRepeatToggleButton) {
+    return;
+  }
+  const icon = repeatActive ? "⏹" : "↻";
+  floatingRepeatToggleButton.textContent = icon;
+  floatingRepeatToggleButton.classList.toggle("repeat-active", repeatActive);
+  floatingRepeatToggleButton.setAttribute(
+    "aria-label",
+    repeatActive ? "連続実行停止" : "連続実行開始"
+  );
+}
+
+function updateProgressBars(percent) {
+  progressBarFill.style.width = `${percent}%`;
+  if (floatingProgressBarFill) {
+    floatingProgressBarFill.style.width = `${percent}%`;
+  }
+}
+
 function resetExecutionState() {
   executionState.textContent = "待機中";
   currentNode.textContent = "-";
-  progressBarFill.style.width = "0%";
+  updateProgressBars(0);
   progressText.textContent = "0%";
   executionError.textContent = "";
   resultImages.innerHTML = "";
@@ -642,7 +666,7 @@ function handleWsEvent(data) {
       }
       if (payload.value !== undefined && payload.max) {
         const percent = Math.min(100, Math.round((payload.value / payload.max) * 100));
-        progressBarFill.style.width = `${percent}%`;
+        updateProgressBars(percent);
         progressText.textContent = `${percent}%`;
       }
       break;
@@ -868,6 +892,8 @@ async function savePrompt() {
 parsePromptButton.addEventListener("click", parsePromptJson);
 queuePromptButton.addEventListener("click", queuePrompt);
 repeatToggleButton.addEventListener("click", toggleRepeat);
+floatingQueuePromptButton?.addEventListener("click", queuePrompt);
+floatingRepeatToggleButton?.addEventListener("click", toggleRepeat);
 loadObjectInfoButton.addEventListener("click", loadObjectInfo);
 saveDefaultUrlButton.addEventListener("click", saveDefaultUrl);
 restoreDefaultUrlButton.addEventListener("click", restoreDefaultUrl);
