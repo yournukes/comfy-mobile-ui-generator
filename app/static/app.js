@@ -45,6 +45,7 @@ let wsMode = null;
 let activeWsClientId = null;
 let activeWsBaseUrl = null;
 let repeatActive = false;
+let lastJobRestored = false;
 
 function formatTimestamp(date = new Date()) {
   return date.toLocaleTimeString("ja-JP", { hour12: false });
@@ -485,6 +486,34 @@ async function refreshRepeatStatus() {
   }
 }
 
+async function restoreLastJob() {
+  if (lastJobRestored) {
+    return;
+  }
+  lastJobRestored = true;
+  try {
+    const data = await fetchJson("/api/last_job");
+    if (!data || !data.prompt_id || !data.base_url) {
+      return;
+    }
+    if (!baseUrlInput.value.trim()) {
+      baseUrlInput.value = data.base_url;
+    }
+    activeRun = { mode: data.mode || "manual", promptId: data.prompt_id, baseUrl: data.base_url };
+    executionState.textContent = "復元中";
+    if (data.client_id) {
+      if (data.mode === "repeat") {
+        connectRepeatWebSocket(data.base_url, data.client_id);
+      } else {
+        connectWebSocket(data.base_url, data.client_id);
+      }
+    }
+    await fetchResults();
+  } catch (error) {
+    addLogEntry("前回ジョブ復元失敗", error.message, true);
+  }
+}
+
 async function toggleRepeat() {
   if (repeatActive) {
     try {
@@ -906,5 +935,6 @@ promptInput.addEventListener("input", () => {
 });
 
 refreshSavedList();
+restoreLastJob();
 refreshRepeatStatus();
 setInterval(refreshRepeatStatus, 5000);
