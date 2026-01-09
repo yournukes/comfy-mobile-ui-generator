@@ -8,6 +8,7 @@ const promptInput = document.getElementById("promptInput");
 const parsePromptButton = document.getElementById("parsePrompt");
 const queuePromptButton = document.getElementById("queuePrompt");
 const repeatToggleButton = document.getElementById("repeatToggle");
+const repeatCountInput = document.getElementById("repeatCount");
 const floatingQueuePromptButton = document.getElementById("floatingQueuePrompt");
 const floatingRepeatToggleButton = document.getElementById("floatingRepeatToggle");
 const parseStatus = document.getElementById("parseStatus");
@@ -27,6 +28,7 @@ const nodeCards = document.getElementById("nodeCards");
 
 const executionState = document.getElementById("executionState");
 const currentNode = document.getElementById("currentNode");
+const generationTime = document.getElementById("generationTime");
 const progressBarFill = document.getElementById("progressBarFill");
 const floatingProgressBarFill = document.getElementById("floatingProgressBarFill");
 const progressText = document.getElementById("progressText");
@@ -40,6 +42,7 @@ let currentPrompt = null;
 let currentPromptWrapper = null;
 let wsConnection = null;
 let activeRun = { mode: null, promptId: null, baseUrl: null };
+let runStartTime = null;
 let lastRepeatPromptId = null;
 let wsMode = null;
 let activeWsClientId = null;
@@ -441,11 +444,17 @@ function renderRepeatStatus(state) {
   if (state.runs !== undefined && state.runs !== null) {
     message += ` / 実行回数: ${state.runs}`;
   }
+  if (state.max_runs) {
+    message += ` / 目標回数: ${state.max_runs}`;
+  }
   if (state.last_prompt_id) {
     message += ` / 最新ID: ${state.last_prompt_id}`;
   }
   if (state.last_finished_at) {
     message += ` / 最終完了: ${state.last_finished_at}`;
+  }
+  if (!repeatActive && state.stop_reason) {
+    message += ` / 停止理由: ${state.stop_reason}`;
   }
   if (state.last_error) {
     setStatus(repeatStatus, `連続実行エラー: ${state.last_error}`, true);
@@ -547,10 +556,16 @@ async function toggleRepeat() {
   }
   setStatus(repeatStatus, "連続実行を開始しています...");
   try {
+    const repeatCountRaw = repeatCountInput?.value.trim();
+    const maxRuns = repeatCountRaw ? Number.parseInt(repeatCountRaw, 10) : null;
+    if (repeatCountRaw && (!Number.isFinite(maxRuns) || maxRuns <= 0)) {
+      setStatus(repeatStatus, "繰り返し回数は1以上の整数で入力してください", true);
+      return;
+    }
     const data = await fetchJson("/api/repeat/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt }),
+      body: JSON.stringify({ base_url: baseUrl, prompt: currentPrompt, max_runs: maxRuns }),
     });
     renderRepeatStatus(data);
     activeRun = { mode: "repeat", promptId: data.last_prompt_id || null, baseUrl };
@@ -582,13 +597,36 @@ function updateProgressBars(percent) {
   }
 }
 
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "-";
+  }
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) {
+    return `${totalSeconds.toFixed(1)}秒`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}分${seconds.toFixed(1)}秒`;
+}
+
+function finalizeRunDuration() {
+  if (!runStartTime) {
+    return;
+  }
+  const durationMs = Date.now() - runStartTime;
+  generationTime.textContent = formatDuration(durationMs);
+  runStartTime = null;
+}
+
 function resetExecutionState() {
   executionState.textContent = "待機中";
   currentNode.textContent = "-";
   updateProgressBars(0);
   progressText.textContent = "0%";
   executionError.textContent = "";
-  resultImages.innerHTML = "";
+  generationTime.textContent = "-";
+  runStartTime = null;
 }
 
 function connectWebSocket(baseUrl, clientId) {
@@ -667,6 +705,8 @@ function handleWsEvent(data) {
         return;
       }
       executionState.textContent = "実行開始";
+      runStartTime = Date.now();
+      generationTime.textContent = "計測中...";
       break;
     case "executing":
       if (!matchesLatestPrompt()) {
@@ -675,6 +715,7 @@ function handleWsEvent(data) {
       if (payload.node === null) {
         executionState.textContent = "完了";
         currentNode.textContent = "-";
+        finalizeRunDuration();
         fetchResults();
         if (activeRun.mode === "manual") {
           activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
@@ -704,6 +745,7 @@ function handleWsEvent(data) {
         return;
       }
       executionState.textContent = "成功";
+      finalizeRunDuration();
       fetchResults();
       if (activeRun.mode === "manual") {
         activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
@@ -716,6 +758,7 @@ function handleWsEvent(data) {
       }
       executionState.textContent = "エラー";
       executionError.textContent = payload.message || data.message || "エラーが発生しました";
+      finalizeRunDuration();
       if (activeRun.mode === "manual") {
         activeRun = { mode: null, promptId: null, baseUrl: activeRun.baseUrl };
       }
