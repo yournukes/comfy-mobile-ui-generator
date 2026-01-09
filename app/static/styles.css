@@ -78,8 +78,8 @@ select {
 }
 
 textarea {
-  resize: none;
-  overflow: hidden;
+  resize: vertical;
+  overflow: auto;
   min-height: 120px;
 }
 
@@ -143,9 +143,10 @@ button.repeat-active {
   width: 100%;
   text-align: left;
   padding: 10px 12px;
-  background: #f0f4ff;
+  background: #dbe4ff;
   border: none;
   font-weight: 600;
+  color: var(--text);
 }
 
 .node-body {
@@ -202,17 +203,33 @@ button.repeat-active {
   gap: 12px;
 }
 
+.image-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.image-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .image-list img {
   width: 100%;
   border-radius: 8px;
   border: 1px solid var(--border);
   cursor: zoom-in;
+  transition: transform 0.2s ease, filter 0.2s ease;
 }
 
 .image-list img.zoom {
   transform: scale(1.4);
   cursor: zoom-out;
-  transition: transform 0.2s ease;
+}
+
+.image-list.masked img {
+  filter: blur(12px);
 }
 
 .saved-list {
